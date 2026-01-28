@@ -1,12 +1,12 @@
-// Navbar.tsx
 import { useState, useEffect } from "react";
+import { useAuth } from "../../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  Menu, 
-  X, 
-  Building2, 
-  ChevronRight, 
+import {
+  Menu,
+  X,
+  Building2,
+  ChevronRight,
   Home,
   Briefcase,
   TrendingUp,
@@ -23,8 +23,8 @@ interface NavLink {
 const navLinks: NavLink[] = [
   { label: "Accueil", href: "/", icon: <Home className="w-4 h-4" /> },
   { label: "Services", href: "#services", icon: <Briefcase className="w-4 h-4" /> },
-  { label: "Solutions", href: "#solutions", icon: <TrendingUp className="w-4 h-4" /> },
-  { label: "FAQ", href: "#faq", icon: <HelpCircle className="w-4 h-4" /> },
+  { label: "Solutions", href: "/#how-it-works", icon: <TrendingUp className="w-4 h-4" /> },
+  { label: "FAQ", href: "/#faq", icon: <HelpCircle className="w-4 h-4" /> },
   { label: "Contact", href: "#contact", icon: <MessageCircle className="w-4 h-4" /> },
 ];
 
@@ -34,11 +34,11 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   className?: string;
 }
 
-const Button: React.FC<ButtonProps> = ({ 
-  variant = "ghost", 
-  children, 
-  className = "", 
-  ...props 
+const Button: React.FC<ButtonProps> = ({
+  variant = "ghost",
+  children,
+  className = "",
+  ...props
 }) => {
   const variantClasses = {
     ghost: "btn btn-ghost text-gray-400 hover:text-white hover:bg-gray-800",
@@ -47,7 +47,7 @@ const Button: React.FC<ButtonProps> = ({
   };
 
   return (
-    <button 
+    <button
       className={`${variantClasses[variant]} ${className} font-medium`}
       {...props}
     >
@@ -60,7 +60,13 @@ export function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeLink, setActiveLink] = useState("/");
+  const { user, signOut } = useAuth();
   const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await signOut();
+    navigate("/");
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -78,14 +84,31 @@ export function Navbar() {
 
   const handleNavClick = (href: string) => {
     setActiveLink(href);
-    
+
+    // Si c'est une ancre interne (ex: #services)
     if (href.startsWith("#")) {
       const element = document.querySelector(href);
       if (element) {
         element.scrollIntoView({ behavior: "smooth" });
         setIsMobileMenuOpen(false);
       }
-    } else {
+    }
+    // Si c'est un lien externe avec ancre (ex: /#how-it-works)
+    else if (href.includes("#")) {
+      const [path, hash] = href.split("#");
+      if (window.location.pathname === path || (window.location.pathname === "/" && path === "/")) {
+        const element = document.querySelector(`#${hash}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth" });
+          setIsMobileMenuOpen(false);
+          return;
+        }
+      }
+      navigate(href);
+      setIsMobileMenuOpen(false);
+    }
+    // Sinon c'est une navigation classique (ex: /)
+    else {
       navigate(href);
       setIsMobileMenuOpen(false);
     }
@@ -98,17 +121,16 @@ export function Navbar() {
         initial={{ y: -100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.5, ease: "easeOut" }}
-        className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 transition-all duration-300 ${
-          isScrolled 
-            ? "bg-gray-900/95 backdrop-blur-xl shadow-2xl" 
-            : "bg-gray-900"
-        } rounded-full border border-gray-800`}
+        className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 transition-all duration-300 ${isScrolled
+          ? "bg-gray-900/95 backdrop-blur-xl shadow-2xl"
+          : "bg-gray-900"
+          } rounded-full border border-gray-800`}
         style={{ width: 'calc(100% - 2rem)', maxWidth: '1280px' }}
       >
         <div className="px-6 py-3">
           <div className="flex items-center justify-between">
             {/* Logo sobre et professionnel */}
-            <motion.div 
+            <motion.div
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               className="flex items-center gap-3 cursor-pointer group"
@@ -134,11 +156,10 @@ export function Navbar() {
                     onClick={() => handleNavClick(link.href)}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium transition-all duration-200 relative ${
-                      activeLink === link.href
-                        ? "text-white"
-                        : "text-gray-400 hover:text-white hover:bg-gray-700/50"
-                    }`}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium transition-all duration-200 relative ${activeLink === link.href
+                      ? "text-white"
+                      : "text-gray-400 hover:text-white hover:bg-gray-700/50"
+                      }`}
                   >
                     {activeLink === link.href && (
                       <motion.div
@@ -147,9 +168,8 @@ export function Navbar() {
                         transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                       />
                     )}
-                    <span className={`relative z-10 ${
-                      activeLink === link.href ? "text-amber-400" : "text-gray-400 group-hover:text-gray-200"
-                    }`}>
+                    <span className={`relative z-10 ${activeLink === link.href ? "text-amber-400" : "text-gray-400 group-hover:text-gray-200"
+                      }`}>
                       {link.icon}
                     </span>
                     <span className="relative z-10">{link.label}</span>
@@ -162,21 +182,42 @@ export function Navbar() {
             <div className="flex items-center gap-3">
               {/* Boutons CTA Desktop - Design épuré */}
               <div className="hidden lg:flex items-center gap-3">
-                <Button
-                  variant="secondary"
-                  onClick={() => navigate("/sign-in")}
-                  className="px-5 text-sm"
-                >
-                  Connexion
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={() => navigate("/sign-up")}
-                  className="px-6 gap-2 text-sm"
-                >
-                  Essayer gratuitement
-                  <ChevronRight className="w-4 h-4" />
-                </Button>
+                {user ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      onClick={() => navigate("/dashboard")}
+                      className="px-5 text-sm"
+                    >
+                      Dashboard
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={handleLogout}
+                      className="px-6 gap-2 text-sm"
+                    >
+                      Déconnexion
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="secondary"
+                      onClick={() => navigate("/sign-in")}
+                      className="px-5 text-sm"
+                    >
+                      Connexion
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={() => navigate("/sign-up")}
+                      className="px-6 gap-2 text-sm"
+                    >
+                      Essayer gratuitement
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                  </>
+                )}
               </div>
 
               {/* Bouton Menu Mobile sobre */}
@@ -213,15 +254,13 @@ export function Navbar() {
                     key={link.label}
                     onClick={() => handleNavClick(link.href)}
                     whileHover={{ x: 5 }}
-                    className={`flex items-center gap-3 w-full px-4 py-3 rounded-lg text-base font-medium transition-all duration-200 ${
-                      activeLink === link.href
-                        ? "bg-gray-800 text-white border border-gray-700"
-                        : "text-gray-400 hover:bg-gray-800/50"
-                    }`}
+                    className={`flex items-center gap-3 w-full px-4 py-3 rounded-lg text-base font-medium transition-all duration-200 ${activeLink === link.href
+                      ? "bg-gray-800 text-white border border-gray-700"
+                      : "text-gray-400 hover:bg-gray-800/50"
+                      }`}
                   >
-                    <span className={`${
-                      activeLink === link.href ? "text-amber-400" : "text-gray-500"
-                    }`}>
+                    <span className={`${activeLink === link.href ? "text-amber-400" : "text-gray-500"
+                      }`}>
                       {link.icon}
                     </span>
                     <span>{link.label}</span>
@@ -230,29 +269,56 @@ export function Navbar() {
                     )}
                   </motion.button>
                 ))}
-                
+
                 <div className="pt-4 mt-3 border-t border-gray-800 flex flex-col gap-3">
-                  <Button
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => {
-                      navigate("/sign-in");
-                      setIsMobileMenuOpen(false);
-                    }}
-                  >
-                    Connexion
-                  </Button>
-                  <Button
-                    variant="primary"
-                    className="w-full gap-2"
-                    onClick={() => {
-                      navigate("/sign-up");
-                      setIsMobileMenuOpen(false);
-                    }}
-                  >
-                    Essayer gratuitement
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
+                  {user ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => {
+                          navigate("/dashboard");
+                          setIsMobileMenuOpen(false);
+                        }}
+                      >
+                        Dashboard
+                      </Button>
+                      <Button
+                        variant="primary"
+                        className="w-full"
+                        onClick={() => {
+                          handleLogout();
+                          setIsMobileMenuOpen(false);
+                        }}
+                      >
+                        Déconnexion
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => {
+                          navigate("/sign-in");
+                          setIsMobileMenuOpen(false);
+                        }}
+                      >
+                        Connexion
+                      </Button>
+                      <Button
+                        variant="primary"
+                        className="w-full gap-2"
+                        onClick={() => {
+                          navigate("/sign-up");
+                          setIsMobileMenuOpen(false);
+                        }}
+                      >
+                        Essayer gratuitement
+                        <ChevronRight className="w-4 h-4" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </motion.div>

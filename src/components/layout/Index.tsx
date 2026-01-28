@@ -12,7 +12,7 @@ export function Layout({ children }: LayoutProps) {
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-gray-950 dark:to-gray-900">
       <Navbar />
       
-      <main className="pt-4">
+      <main className="pt-24">
         {children}
       </main>
       

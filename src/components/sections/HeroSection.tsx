@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Users, Star, Zap, Code } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useAuth } from "../../contexts/AuthContext";
 
 // Composants utilitaires
 const MoreHorizontal = ({ className }: { className?: string }) => (
@@ -117,7 +118,16 @@ const seoKeywords = {
 
 export function HeroSection() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [currentPost, setCurrentPost] = useState(0);
+
+  const handleStartProject = () => {
+    if (user) {
+      navigate("/dashboard");
+    } else {
+      navigate("/sign-up");
+    }
+  };
 
   const posts = [
     {
@@ -266,7 +276,7 @@ export function HeroSection() {
                 className="flex flex-col sm:flex-row gap-4 pt-4"
               >
                 <button
-                  onClick={() => navigate("/sign-up")}
+                  onClick={handleStartProject}
                   className="group relative px-8 py-4 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-white rounded-full font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-3"
                   aria-label="Démarrer votre projet de développement"
                 >
@@ -405,8 +415,8 @@ export function HeroSection() {
                           <div
                             key={index}
                             className={`w - 1.5 h - 1.5 rounded - full transition - all duration - 300 ${index === currentPost
-                                ? 'bg-amber-500 w-4'
-                                : 'bg-gray-300 dark:bg-gray-600'
+                              ? 'bg-amber-500 w-4'
+                              : 'bg-gray-300 dark:bg-gray-600'
                               } `}
                           />
                         ))}
@@ -426,7 +436,7 @@ export function HeroSection() {
                         </div>
                         <div
                           className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center cursor-pointer hover:scale-110 transition-transform"
-                          onClick={() => navigate("/sign-up")}
+                          onClick={handleStartProject}
                         >
                           <Zap className="w-4 h-4 text-white" />
                         </div>

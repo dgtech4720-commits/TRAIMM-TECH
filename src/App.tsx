@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import Dashboard from "./pages/DashboardPage";
 import OnBoardingPage from "./pages/OnBoardingPage";
+import CreateProjectPage from "./pages/CreateProjectPage"; // New Import
 import Loading from "./components/Loading";
 import NotFound from "./components/NotFound";
 import "./App.css";
@@ -34,6 +35,15 @@ const App = () => {
               element={
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            {/* New Protected Route for CreateProjectPage */}
+            <Route
+              path="/create-project"
+              element={
+                <ProtectedRoute>
+                  <CreateProjectPage />
                 </ProtectedRoute>
               }
             />

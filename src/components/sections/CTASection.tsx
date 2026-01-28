@@ -1,9 +1,19 @@
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Sparkles } from "lucide-react";
+import { useAuth } from "../../contexts/AuthContext";
 
 export function CTASection() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const handleStartAction = () => {
+    if (user) {
+      navigate("/dashboard");
+    } else {
+      navigate("/sign-up");
+    }
+  };
 
   return (
     <section id="contact" className="py-20 lg:py-32">
@@ -67,10 +77,10 @@ export function CTASection() {
               className="flex flex-col sm:flex-row items-center justify-center gap-4"
             >
               <button
-                onClick={() => navigate("/sign-up")}
+                onClick={handleStartAction}
                 className="btn btn-lg w-full sm:w-auto rounded-full px-8 gap-2 font-semibold bg-base-100 text-primary hover:bg-base-100/90 shadow-2xl"
               >
-                Créer mon compte gratuit
+                {user ? "Accéder au dashboard" : "Créer mon compte gratuit"}
                 <ArrowRight className="w-5 h-5" />
               </button>
               <button

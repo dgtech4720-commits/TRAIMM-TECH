@@ -1,176 +1,151 @@
--- ============================================
--- DGTECH - Schéma de base de données Supabase
--- ============================================
+-- #################################################
+-- ###      SCHEMA V3.1 - DGTECH / TRAIMM-TECH   ###
+-- #################################################
+-- Version corrigée suite à l'erreur de colonne générée.
+-- Utilise une VIEW pour les totaux de projet.
 
--- Table des profils utilisateurs (étend auth.users)
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
-  email TEXT UNIQUE NOT NULL,
+-- Supprime les anciennes tables et vues si elles existent pour un redémarrage propre
+DROP VIEW IF EXISTS public.projects_with_totals;
+DROP TABLE IF EXISTS public.deliverables CASCADE;
+DROP TABLE IF EXISTS public.project_chat_messages CASCADE;
+DROP TABLE IF EXISTS public.milestones CASCADE;
+DROP TABLE IF EXISTS public.projects CASCADE;
+DROP TABLE IF EXISTS public.profiles CASCADE;
+
+-- #################################################
+-- ###            TABLE DES UTILISATEURS         ###
+-- #################################################
+CREATE TABLE public.profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('client', 'manager', 'developer')),
   full_name TEXT,
   avatar_url TEXT,
-  role TEXT DEFAULT 'user' CHECK (role IN ('user', 'admin', 'student')),
-  -- Colonnes pour l'onboarding
-  company TEXT,
-  user_type TEXT CHECK (user_type IN ('student', 'startup', 'company', 'developer')),
-  onboarding_completed BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
+COMMENT ON TABLE public.profiles IS 'Stores public profile information for each user.';
 
--- Table des projets
-CREATE TABLE IF NOT EXISTS public.projects (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
-  name TEXT NOT NULL,
+-- #################################################
+-- ###             TABLE DES PROJETS (corrigée)  ###
+-- #################################################
+CREATE TABLE public.projects (
+  id SERIAL PRIMARY KEY,
+  client_id UUID NOT NULL REFERENCES public.profiles(id),
+  manager_id UUID REFERENCES public.profiles(id),
+  title TEXT NOT NULL,
   description TEXT,
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'cancelled')),
-  progress INTEGER DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
-  budget DECIMAL(10, 2),
-  deadline DATE,
-  technologies TEXT[], -- Array de technologies utilisées
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+  status TEXT NOT NULL DEFAULT 'BROUILLON' CHECK (status IN ('BROUILLON', 'SOUMIS', 'CHIFFRAGE', 'EN_NEGOCIATION', 'EN_ATTENTE_PAIEMENT', 'ACTIF', 'EN_PAUSE', 'TERMINÉ', 'EN_GARANTIE', 'ANNULÉ')),
+  
+  -- La colonne `total_price` a été retirée pour être remplacée par une vue.
+  
+  deposit_type TEXT CHECK (deposit_type IN ('percentage', 'fixed')),
+  deposit_value NUMERIC(10, 2),
+  deposit_paid BOOLEAN NOT NULL DEFAULT FALSE,
+  final_balance_paid BOOLEAN NOT NULL DEFAULT FALSE,
+  payment_method_used TEXT,
 
--- Table des messages/conversations
-CREATE TABLE IF NOT EXISTS public.messages (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE,
-  sender_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  submitted_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ
+);
+COMMENT ON TABLE public.projects IS 'Central table for managing projects. Does not contain calculated totals.';
+
+-- #################################################
+-- ###             TABLE DES JALONS              ###
+-- #################################################
+CREATE TABLE public.milestones (
+  id SERIAL PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  developer_id UUID REFERENCES public.profiles(id),
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'A_FAIRE' CHECK (status IN ('A_FAIRE', 'EN_COURS', 'BLOQUE', 'EN_REVUE', 'EN_CORRECTION', 'VALIDÉ')),
+  price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  due_date DATE
+);
+COMMENT ON TABLE public.milestones IS 'Defines a specific, deliverable stage of a project with a price.';
+
+-- #################################################
+-- ###      VUE CALCULÉE POUR LES TOTAUX         ###
+-- #################################################
+CREATE VIEW public.projects_with_totals AS
+SELECT
+  p.*,
+  (SELECT COALESCE(SUM(m.price), 0) FROM public.milestones m WHERE m.project_id = p.id)::NUMERIC(10,2) AS total_price
+FROM public.projects p;
+
+COMMENT ON VIEW public.projects_with_totals IS 'Extends projects with dynamically calculated total_price from its milestones.';
+
+
+-- #################################################
+-- ###     TABLE DES MESSAGES ("Memo Magique")     ###
+-- #################################################
+CREATE TABLE public.project_chat_messages (
+  id BIGSERIAL PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES public.profiles(id),
   content TEXT NOT NULL,
-  is_read BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  is_formalized BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
+COMMENT ON TABLE public.project_chat_messages IS 'Stores the informal chat history for a project.';
 
--- Table des documents/fichiers
-CREATE TABLE IF NOT EXISTS public.documents (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
-  name TEXT NOT NULL,
+-- #################################################
+-- ###           TABLE DES LIVRABLES             ###
+-- #################################################
+CREATE TABLE public.deliverables (
+  id SERIAL PRIMARY KEY,
+  milestone_id INTEGER NOT NULL REFERENCES public.milestones(id) ON DELETE CASCADE,
+  uploader_id UUID NOT NULL REFERENCES public.profiles(id),
   file_url TEXT NOT NULL,
-  file_type TEXT,
-  file_size INTEGER,
-  uploaded_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
+COMMENT ON TABLE public.deliverables IS 'Files and other proofs of work attached to a milestone.';
 
 -- ============================================
--- INDEXES pour améliorer les performances
+-- INDEXES
 -- ============================================
-
-CREATE INDEX IF NOT EXISTS idx_projects_user_id ON public.projects(user_id);
-CREATE INDEX IF NOT EXISTS idx_projects_status ON public.projects(status);
-CREATE INDEX IF NOT EXISTS idx_messages_project_id ON public.messages(project_id);
-CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON public.messages(sender_id);
-CREATE INDEX IF NOT EXISTS idx_documents_project_id ON public.documents(project_id);
+CREATE INDEX ON public.projects(client_id);
+CREATE INDEX ON public.projects(manager_id);
+CREATE INDEX ON public.projects(status);
+CREATE INDEX ON public.milestones(project_id);
+CREATE INDEX ON public.milestones(developer_id);
+CREATE INDEX ON public.project_chat_messages(project_id);
 
 -- ============================================
 -- ROW LEVEL SECURITY (RLS)
 -- ============================================
-
--- Activer RLS sur toutes les tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.milestones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.deliverables ENABLE ROW LEVEL SECURITY;
 
--- Policies pour profiles
-CREATE POLICY "Les utilisateurs peuvent voir leur propre profil"
-  ON public.profiles FOR SELECT
-  USING (auth.uid() = id);
+CREATE POLICY "Allow read access to all users" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
-CREATE POLICY "Les utilisateurs peuvent mettre à jour leur propre profil"
-  ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
+CREATE POLICY "Allow full access to project members" ON public.projects
+  USING ( auth.uid() = client_id OR auth.uid() = manager_id );
 
--- Policies pour projects
-CREATE POLICY "Les utilisateurs peuvent voir leurs propres projets"
-  ON public.projects FOR SELECT
-  USING (auth.uid() = user_id);
+CREATE POLICY "Allow read access to project members" ON public.milestones
+  USING ( EXISTS (SELECT 1 FROM projects WHERE projects.id = milestones.project_id) );
 
-CREATE POLICY "Les utilisateurs peuvent créer leurs propres projets"
-  ON public.projects FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Les utilisateurs peuvent mettre à jour leurs propres projets"
-  ON public.projects FOR UPDATE
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Les utilisateurs peuvent supprimer leurs propres projets"
-  ON public.projects FOR DELETE
-  USING (auth.uid() = user_id);
-
--- Policies pour messages
-CREATE POLICY "Les utilisateurs peuvent voir les messages de leurs projets"
-  ON public.messages FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.projects
-      WHERE projects.id = messages.project_id
-      AND projects.user_id = auth.uid()
-    )
-    OR sender_id = auth.uid()
-  );
-
-CREATE POLICY "Les utilisateurs peuvent créer des messages"
-  ON public.messages FOR INSERT
-  WITH CHECK (auth.uid() = sender_id);
-
--- Policies pour documents
-CREATE POLICY "Les utilisateurs peuvent voir les documents de leurs projets"
-  ON public.documents FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.projects
-      WHERE projects.id = documents.project_id
-      AND projects.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Les utilisateurs peuvent uploader des documents pour leurs projets"
-  ON public.documents FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.projects
-      WHERE projects.id = project_id
-      AND projects.user_id = auth.uid()
-    )
-  );
+CREATE POLICY "Allow access to project members" ON public.project_chat_messages
+  USING ( EXISTS (SELECT 1 FROM projects WHERE projects.id = project_chat_messages.project_id) );
 
 -- ============================================
--- TRIGGERS pour updated_at automatique
+-- TRIGGER NOUVEL UTILISATEUR
 -- ============================================
-
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER update_profiles_updated_at
-  BEFORE UPDATE ON public.profiles
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_projects_updated_at
-  BEFORE UPDATE ON public.projects
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
--- ============================================
--- TRIGGER pour créer automatiquement un profil
--- ============================================
-
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name)
+  INSERT INTO public.profiles (id, role, full_name, avatar_url)
   VALUES (
     NEW.id,
-    NEW.email,
-    NEW.raw_user_meta_data->>'full_name'
+    'client',
+    NEW.raw_user_meta_data->>'full_name',
+    NEW.raw_user_meta_data->>'avatar_url'
   );
   RETURN NEW;
 END;
@@ -180,18 +155,3 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
-
--- ============================================
--- DONNÉES DE TEST (Optionnel - à supprimer en production)
--- ============================================
-
--- Exemple de projet (à adapter avec un vrai user_id après inscription)
--- INSERT INTO public.projects (user_id, name, description, status, progress, technologies)
--- VALUES (
---   'votre-user-id-ici',
---   'Application E-commerce',
---   'Développement d''une plateforme e-commerce avec React et Node.js',
---   'in_progress',
---   65,
---   ARRAY['React', 'Node.js', 'PostgreSQL', 'Stripe']
--- );
