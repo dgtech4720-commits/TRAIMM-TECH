@@ -21,22 +21,49 @@ export default function Dashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectWithTotals[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [submittingId, setSubmittingId] = useState<number | null>(null);
+
+  const [projectToSubmit, setProjectToSubmit] = useState<ProjectWithTotals | null>(null);
+  const [expandedProjectId, setExpandedProjectId] = useState<number | null>(null); // State pour l'expansion des cartes
+
+  const loadProjects = async () => {
+    if (!user) return;
+    try {
+      setIsLoading(true);
+      const userProjects = await projectsService.getProjectsForClient(user.id);
+      setProjects(userProjects);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function loadProjects() {
-      if (!user) return;
-      try {
-        setIsLoading(true);
-        const userProjects = await projectsService.getProjectsForClient(user.id);
-        setProjects(userProjects);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
-    }
     loadProjects();
   }, [user]);
+
+  const handleOpenSubmitModal = (project: ProjectWithTotals, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setProjectToSubmit(project);
+  };
+
+  const cancelSubmit = () => {
+    setProjectToSubmit(null);
+  };
+
+  const confirmSubmit = async () => {
+    if (!projectToSubmit) return;
+
+    setSubmittingId(projectToSubmit.id);
+    const success = await projectsService.submitProject(projectToSubmit.id);
+    if (success) {
+      // Rafraîchir la liste
+      await loadProjects();
+      setProjectToSubmit(null);
+    }
+    setSubmittingId(null);
+  };
 
   const handleLogout = async () => {
     await signOut();
@@ -73,10 +100,10 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { label: "Projets actifs", value: projects.filter(p => p.status === PROJECT_STATUSES.ACTIVE).length, icon: FolderKanban, trend: "+1 ce mois", color: "text-amber-400", bg: "bg-amber-500/20" },
-          { label: "Tâches terminées", value: "24", icon: CheckCircle2, trend: "+8 cette semaine", color: "text-emerald-400", bg: "bg-emerald-500/20" },
-          { label: "Messages non lus", value: "3", icon: MessageSquare, trend: "2 urgents", color: "text-yellow-400", bg: "bg-yellow-500/20" },
-          { label: "Documents", value: "12", icon: FileText, trend: "4 nouveaux", color: "text-cyan-400", bg: "bg-cyan-500/20" },
+          { label: "Projets actifs", value: projects.filter(p => p.status !== PROJECT_STATUSES.DRAFT && p.status !== PROJECT_STATUSES.CANCELLED && p.status !== PROJECT_STATUSES.COMPLETED).length, icon: FolderKanban, trend: "--", color: "text-amber-400", bg: "bg-amber-500/20" },
+          { label: "Tâches terminées", value: "0", icon: CheckCircle2, trend: "--", color: "text-emerald-400", bg: "bg-emerald-500/20" },
+          { label: "Messages non lus", value: "0", icon: MessageSquare, trend: "--", color: "text-yellow-400", bg: "bg-yellow-500/20" },
+          { label: "Documents", value: "0", icon: FileText, trend: "--", color: "text-cyan-400", bg: "bg-cyan-500/20" },
         ].map((stat) => (
           <div key={stat.label} className="bg-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-800 hover:border-amber-500/50 transition-all p-6">
             <div className={`w-12 h-12 rounded-xl ${stat.bg} flex items-center justify-center mb-4`}>
@@ -102,25 +129,97 @@ export default function Dashboard() {
     </div>
   );
 
-  const renderProjectList = () => {
+  const renderProjectList = (allowExpand: boolean = false) => {
     if (isLoading) return <div className="flex justify-center p-10"><Loader className="animate-spin text-amber-500" size={40} /></div>;
     if (projects.length === 0) return <p className="text-center text-gray-500 py-10">Aucun projet pour le moment.</p>;
 
     return (
       <div className="space-y-3">
         {projects.map((project) => (
-          <div key={project.id} className="group flex items-center gap-4 p-4 rounded-xl bg-gray-800/50 hover:bg-gray-800 border border-gray-700 hover:border-amber-500/50 transition-all cursor-pointer">
-            <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-500/20 to-yellow-500/20 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform">
-              <FolderKanban className="w-6 h-6" />
+          <div
+            key={project.id}
+            className={`group rounded-xl bg-gray-800/50 border border-gray-700 hover:border-amber-500/50 transition-all overflow-hidden ${allowExpand && expandedProjectId === project.id ? 'bg-gray-800 border-amber-500/30' : ''}`}
+            onClick={() => allowExpand ? setExpandedProjectId(expandedProjectId === project.id ? null : project.id) : null}
+          >
+            {/* HEADER */}
+            <div className={`flex items-center gap-4 p-4 flex-wrap sm:flex-nowrap ${allowExpand ? 'cursor-pointer' : ''}`}>
+              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-500/20 to-yellow-500/20 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform flex-shrink-0">
+                <FolderKanban className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-[200px]">
+                <h3 className="font-semibold text-white text-lg">{project.title}</h3>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs text-gray-500">Modifié le {new Date(project.created_at).toLocaleDateString()}</span>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase border border-amber-500/20 flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> {project.status}
+                  </span>
+                </div>
+              </div>
+
+              {/* ACTIONS */}
+              <div className="flex items-center gap-2 ml-auto pl-2">
+                {project.status === PROJECT_STATUSES.DRAFT && (
+                  <button
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-gray-900 text-xs font-bold rounded-lg transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 whitespace-nowrap"
+                    onClick={(e) => handleOpenSubmitModal(project, e)}
+                    disabled={submittingId === project.id}
+                  >
+                    <Send className="w-3 h-3" />
+                    Demander une étude
+                  </button>
+                )}
+
+                {project.status === PROJECT_STATUSES.SUBMITTED && (
+                  <a
+                    href="https://wa.me/237654031589"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 border border-green-500/50 bg-green-500/10 text-green-400 hover:bg-green-500/20 text-xs font-bold rounded-lg transition-all flex items-center gap-2 whitespace-nowrap"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MessageSquare className="w-3 h-3" />
+                    WhatsApp
+                  </a>
+                )}
+
+                {allowExpand && (
+                  <ChevronRight className={`w-5 h-5 text-gray-500 group-hover:text-amber-400 transition-transform duration-200 ml-2 ${expandedProjectId === project.id ? 'rotate-90' : ''}`} />
+                )}
+              </div>
             </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-white">{project.title}</h3>
-              <p className="text-sm text-gray-500">Modifié le {new Date(project.created_at).toLocaleDateString()}</p>
-            </div>
-            <div className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 text-xs font-medium flex items-center gap-1">
-              <Clock className="w-3 h-3" /> {project.status}
-            </div>
-            <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-amber-400 transition-colors" />
+
+            {/* EXPANDED CONTENT */}
+            {allowExpand && expandedProjectId === project.id && (
+              <div className="px-4 pb-4 pt-0 border-t border-gray-700/50 animate-in slide-in-from-top-2 duration-200">
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Description</span>
+                    <p className="text-gray-300 italic bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                      {project.description || "Aucune description fournie pour ce projet."}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Type de projet</span>
+                    <p className="text-amber-400 font-medium bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20 inline-block">
+                      {project.project_type}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-700/50">
+                  <button
+                    className="px-4 py-2 border border-gray-600 text-gray-400 hover:bg-gray-700 hover:text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      alert("Modification bientôt disponible !");
+                    }}
+                  >
+                    <Settings className="w-3 h-3" />
+                    Modifier le projet
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -397,9 +496,14 @@ export default function Dashboard() {
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <h2 className="text-2xl font-bold text-white">Mes Projets</h2>
-                  <button className="px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 text-gray-900 font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-amber-500/30 transition-all"><Plus className="w-5 h-5" /> Créer un projet</button>
+                  <button
+                    onClick={() => navigate('/create-project')}
+                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 text-gray-900 font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-amber-500/30 transition-all"
+                  >
+                    <Plus className="w-5 h-5" /> Créer un projet
+                  </button>
                 </div>
-                {renderProjectList()}
+                {renderProjectList(true)}
               </div>
             )}
             {currentView === 'messages' && renderMessages()}
@@ -409,6 +513,64 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
+
+      {/* MODAL DE CONFIRMATION DE SOUMISSION */}
+      {projectToSubmit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+              <Send className="w-5 h-5 text-amber-500" />
+              Confirmer la demande
+            </h3>
+
+            <div className="bg-gray-800/50 p-4 rounded-xl space-y-2 border border-gray-700/50">
+              <div>
+                <span className="text-xs text-gray-500 uppercase font-bold">Projet</span>
+                <p className="text-white font-medium">{projectToSubmit.title}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="text-xs text-gray-500 uppercase font-bold">Type</span>
+                  <p className="text-amber-400 text-sm">{projectToSubmit.project_type}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 uppercase font-bold">Créé le</span>
+                  <p className="text-gray-300 text-sm">{new Date(projectToSubmit.created_at).toLocaleDateString()}</p>
+                </div>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 uppercase font-bold">Description</span>
+                <p className="text-gray-400 text-sm line-clamp-3 italic">
+                  {projectToSubmit.description || "Aucune description fournie."}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-400">
+              En cliquant sur "Confirmer", votre projet sera transmis à notre équipe pour analyse.
+              Vous recevrez ensuite une estimation par WhatsApp/Email.
+            </p>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={cancelSubmit}
+                className="px-4 py-2 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white transition-colors text-sm font-medium"
+                disabled={submittingId !== null}
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmSubmit}
+                className="px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 text-gray-900 font-bold hover:shadow-lg hover:shadow-amber-500/20 transition-all text-sm flex items-center gap-2"
+                disabled={submittingId !== null}
+              >
+                {submittingId === projectToSubmit.id ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Confirmer et Envoyer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

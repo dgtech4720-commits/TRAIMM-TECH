@@ -249,6 +249,26 @@ async function deleteProject(projectId: number): Promise<boolean> {
   return true;
 }
 
+
+/**
+ * Soumet un projet (Passage de BROUILLON à SOUMIS)
+ */
+async function submitProject(projectId: number): Promise<boolean> {
+  const { error } = await supabase
+    .from('projects')
+    .update({
+      status: 'SOUMIS',
+      submitted_at: new Date().toISOString(),
+    } as any)
+    .eq('id', projectId);
+
+  if (error) {
+    console.error('Error submitting project:', error.message);
+    return false;
+  }
+  return true;
+}
+
 export const projectsService = {
   getProjectById,
   getProjectsForClient,
@@ -258,6 +278,7 @@ export const projectsService = {
   completeOnboarding,
   createProject,
   updateProject,
+  submitProject,
   updateProjectStatus,
   deleteProject,
 };
