@@ -172,6 +172,11 @@ CREATE POLICY "User can update own profile"
 ON public.profiles FOR UPDATE
 USING (auth.uid() = id);
 
+-- AJOUT : Politique pour permettre l'insertion de son propre profil
+CREATE POLICY "User can insert own profile"
+ON public.profiles FOR INSERT
+WITH CHECK (auth.uid() = id);
+
 CREATE POLICY "Project access for client or manager"
 ON public.projects
 USING (

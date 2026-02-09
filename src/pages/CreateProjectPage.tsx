@@ -1,23 +1,34 @@
-import { useState, useContext } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { Plus, GraduationCap, Briefcase, Rocket, Loader } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { projectsService } from '../services/projects.service';
+import { PROJECT_TYPES, type ProjectType } from '../types/database';
+
+const projectTypeOptions = [
+  { id: PROJECT_TYPES.ACADEMIC, label: "Académique", icon: GraduationCap },
+  { id: PROJECT_TYPES.CLIENT, label: "Client", icon: Briefcase },
+  { id: PROJECT_TYPES.PERSONAL, label: "Personnel", icon: Rocket },
+] as const;
 
 export default function CreateProjectPage() {
   const navigate = useNavigate();
-  const { user } = useAuth(); // Récupère l'utilisateur authentifié
+  const { user } = useAuth();
+
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [projectType, setProjectType] = useState<ProjectType>(PROJECT_TYPES.PERSONAL);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!user) {
       setError("Vous devez être connecté pour créer un projet.");
       return;
     }
+
     if (!title.trim()) {
       setError("Le titre du projet est obligatoire.");
       return;
@@ -27,15 +38,14 @@ export default function CreateProjectPage() {
     setError(null);
 
     try {
-      // client_id est l'ID de l'utilisateur connecté
       const newProject = await projectsService.createProject({
         client_id: user.id,
-        title,
-        description: description || null, // Supabase gère mieux les chaînes vides comme null
+        title: title.trim(),
+        description: description.trim() || undefined,
+        project_type: projectType,
       });
 
       if (newProject) {
-        // Rediriger vers le tableau de bord après succès
         navigate('/dashboard');
       } else {
         setError("Une erreur est survenue lors de la création du projet.");
@@ -49,69 +59,103 @@ export default function CreateProjectPage() {
   };
 
   return (
-    <div className="min-h-screen bg-base-100 flex items-center justify-center p-4">
-      <div className="card w-full max-w-md bg-base-100 border border-base-300 shadow-xl">
-        <div className="card-body">
-          <h2 className="card-title text-2xl font-bold text-base-content mb-4">
-            <Plus className="w-6 h-6 mr-2 text-primary" />
-            Créer un nouveau projet
-          </h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="form-control">
-              <label className="label">
-                <span className="label-text">Titre du projet</span>
-              </label>
-              <input
-                type="text"
-                placeholder="Ex: Refonte du site vitrine"
-                className="input input-bordered w-full"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                required
-              />
-            </div>
-            <div className="form-control">
-              <label className="label">
-                <span className="label-text">Description (optionnel)</span>
-              </label>
-              <textarea
-                placeholder="Décrivez votre besoin en quelques mots..."
-                className="textarea textarea-bordered h-24 w-full"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              ></textarea>
-            </div>
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
+      <div className="w-full max-w-lg bg-gray-900 rounded-2xl border border-gray-800 shadow-xl p-8">
+        <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-yellow-500 flex items-center justify-center">
+            <Plus className="w-5 h-5 text-gray-900" />
+          </div>
+          Nouveau projet
+        </h2>
 
-            {error && (
-              <div role="alert" className="alert alert-error">
-                <span>{error}</span>
-              </div>
-            )}
-
-            <div className="card-actions justify-end">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => navigate('/dashboard')}
-                disabled={isLoading}
-              >
-                Annuler
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <span className="loading loading-spinner"></span>
-                ) : (
-                  <Plus className="w-5 h-5" />
-                )}
-                {isLoading ? "Création..." : "Créer le projet"}
-              </button>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Type de projet */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-3">
+              Type de projet
+            </label>
+            <div className="flex gap-2">
+              {projectTypeOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setProjectType(option.id)}
+                  className={`flex-1 py-2 px-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 text-sm
+                    ${projectType === option.id
+                      ? 'border-amber-500 bg-amber-500/20 text-amber-400'
+                      : 'border-gray-700 text-gray-400 hover:border-gray-600'
+                    }
+                  `}
+                >
+                  <option.icon className="w-4 h-4" />
+                  {option.label}
+                </button>
+              ))}
             </div>
-          </form>
-        </div>
+          </div>
+
+          {/* Titre */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Titre du projet <span className="text-amber-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="Ex: Application de gestion de stocks"
+              className="w-full px-4 py-3 rounded-xl bg-gray-800 border border-gray-700 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-white placeholder-gray-500"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+            />
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Description
+            </label>
+            <textarea
+              placeholder="Décrivez votre projet en quelques mots..."
+              className="w-full px-4 py-3 rounded-xl bg-gray-800 border border-gray-700 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-white placeholder-gray-500 resize-none h-28"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+
+          {error && (
+            <div className="p-3 rounded-lg bg-red-500/20 border border-red-500/50 text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              className="flex-1 py-3 rounded-xl border border-gray-700 text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+              onClick={() => navigate('/dashboard')}
+              disabled={isLoading}
+            >
+              Annuler
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-gray-900 font-semibold hover:shadow-lg hover:shadow-amber-500/30 transition-all flex items-center justify-center gap-2"
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Création...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  Créer le projet
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

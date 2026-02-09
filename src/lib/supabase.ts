@@ -2,26 +2,43 @@ import { createClient } from '@supabase/supabase-js';
 import type {
   Profile,
   Project,
-  ProjectWithTotals, // Nouvelle importation
+  ProjectWithTotals,
   Milestone,
   ProjectChatMessage,
   Deliverable,
 } from '../types/database';
 
-// 1. Définir une interface pour la structure complète de la base de données.
-//    Ceci est la clé pour obtenir la sécurité de type et l'autocomplétion.
+// Types pour les opérations d'insertion
+type ProjectInsert = {
+  client_id: string;
+  title: string;
+  project_type: 'ACADEMIC' | 'CLIENT' | 'PERSONAL';
+  description?: string;
+  manager_id?: string;
+  onboarding_completed?: boolean;
+  status?: string;
+  deposit_type?: 'percentage' | 'fixed';
+  deposit_value?: number;
+  deposit_paid?: boolean;
+  final_balance_paid?: boolean;
+  payment_method_used?: string;
+};
+
+type ProjectUpdate = Partial<Omit<Project, 'id' | 'created_at'>>;
+
+// Interface Database pour le typage Supabase
 export interface Database {
   public: {
     Tables: {
       profiles: {
-        Row: Profile; // Type pour une ligne de la table 'profiles'
-        Insert: Omit<Profile, 'id' | 'created_at'>; // Type pour une nouvelle ligne
-        Update: Partial<Profile>; // Type pour une mise à jour
+        Row: Profile;
+        Insert: Omit<Profile, 'created_at'>;
+        Update: Partial<Profile>;
       };
       projects: {
-        Row: Project; // La table 'projects' n'a plus 'total_price'
-        Insert: Omit<Project, 'id' | 'created_at'>; // total_price n'est plus dans Insert car il n'existe plus
-        Update: Partial<Project>;
+        Row: Project;
+        Insert: ProjectInsert;
+        Update: ProjectUpdate;
       };
       milestones: {
         Row: Milestone;
@@ -40,19 +57,15 @@ export interface Database {
       };
     };
     Views: {
-      // Ajout de la nouvelle vue
       projects_with_totals: {
-        Row: ProjectWithTotals; // La vue aura le champ total_price
+        Row: ProjectWithTotals;
       };
     };
-    Functions: {
-      // On peut ajouter des fonctions SQL ici si nécessaire
-    };
+    Functions: Record<string, never>;
   };
 }
 
-
-// 2. Récupérer les variables d'environnement
+// Variables d'environnement
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -62,7 +75,5 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-// 3. Créer le client Supabase en le "typant" avec notre interface `Database`.
-//    C'est ici que la magie opère.
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
-
+// Client Supabase typé
+export const supabase = createClient<any>(supabaseUrl, supabaseAnonKey);

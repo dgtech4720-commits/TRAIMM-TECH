@@ -42,7 +42,7 @@ const PlusIcon = () => (
 );
 
 // Composant pour les avatars
-const Avatar = ({ src, alt }: { src: string; alt: string }) => (
+const Avatar = ({ alt }: { alt: string }) => (
   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center text-white text-xs font-bold">
     {alt.charAt(0)}
   </div>
@@ -57,7 +57,7 @@ const SocialPost = ({ username, time, content, likes, comments }: any) => (
     className="bg-white dark:bg-gray-700 rounded-xl p-4 shadow-sm"
   >
     <div className="flex items-center gap-3 mb-3">
-      <Avatar src="" alt={username} />
+      <Avatar alt={username} />
       <div className="flex-1">
         <div className="font-semibold text-sm text-gray-900 dark:text-white">{username}</div>
         <div className="text-xs text-gray-500 dark:text-gray-400">{time}</div>

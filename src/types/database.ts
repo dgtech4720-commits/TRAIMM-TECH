@@ -1,11 +1,16 @@
 // src/types/database.ts
 
-// On utilise des objets constants pour définir des ensembles de chaînes de caractères.
-// C'est une alternative moderne et flexible aux 'enum' en TypeScript.
+// Constantes pour les rôles, statuts, types de projet
 export const ROLES = {
   CLIENT: 'client',
   MANAGER: 'manager',
   DEVELOPER: 'developer',
+} as const;
+
+export const PROJECT_TYPES = {
+  ACADEMIC: 'ACADEMIC',
+  CLIENT: 'CLIENT',
+  PERSONAL: 'PERSONAL',
 } as const;
 
 export const PROJECT_STATUSES = {
@@ -35,73 +40,86 @@ export const DEPOSIT_TYPES = {
   FIXED: 'fixed',
 } as const;
 
-// On dérive les types à partir des clés des objets constants.
-// ex: Role sera 'client' | 'manager' | 'developer'
+// Types dérivés
 export type Role = typeof ROLES[keyof typeof ROLES];
+export type ProjectType = typeof PROJECT_TYPES[keyof typeof PROJECT_TYPES];
 export type ProjectStatus = typeof PROJECT_STATUSES[keyof typeof PROJECT_STATUSES];
 export type MilestoneStatus = typeof MILESTONE_STATUSES[keyof typeof MILESTONE_STATUSES];
 export type DepositType = typeof DEPOSIT_TYPES[keyof typeof DEPOSIT_TYPES];
 
 
-// Interfaces correspondant à notre schéma de base de données V3
+// Interfaces correspondant au schéma V3.2
 
 export interface Profile {
-  id: string; // UUID
+  id: string;
   role: Role;
   full_name: string | null;
   avatar_url: string | null;
-  created_at: string; // TIMESTAMPTZ
+  created_at: string;
 }
 
 export interface Project {
-  id: number; // SERIAL
-  client_id: string; // UUID
-  manager_id: string | null; // UUID
+  id: number;
+  client_id: string;
+  manager_id: string | null;
   title: string;
   description: string | null;
+  project_type: ProjectType;
+  onboarding_completed: boolean;
   status: ProjectStatus;
-  // total_price a été retiré car c'est maintenant une vue
   deposit_type: DepositType | null;
   deposit_value: number | null;
   deposit_paid: boolean;
   final_balance_paid: boolean;
   payment_method_used: string | null;
-  created_at: string; // TIMESTAMPTZ
-  submitted_at: string | null; // TIMESTAMPTZ
-  started_at: string | null; // TIMESTAMPTZ
-  completed_at: string | null; // TIMESTAMPTZ
+  created_at: string;
+  submitted_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
 }
 
-// Nouvelle interface pour la vue 'projects_with_totals'
 export interface ProjectWithTotals extends Project {
-  total_price: number; // NUMERIC, ajoutée par la vue
+  total_price: number;
 }
 
 export interface Milestone {
-  id: number; // SERIAL
+  id: number;
   project_id: number;
-  developer_id: string | null; // UUID
+  developer_id: string | null;
   title: string;
   description: string | null;
   status: MilestoneStatus;
-  price: number; // NUMERIC
-  due_date: string | null; // DATE
+  price: number;
+  due_date: string | null;
 }
 
 export interface ProjectChatMessage {
-  id: number; // BIGSERIAL
+  id: number;
   project_id: number;
-  sender_id: string; // UUID
+  sender_id: string;
   content: string;
   is_formalized: boolean;
-  created_at: string; // TIMESTAMPTZ
+  created_at: string;
 }
 
 export interface Deliverable {
-  id: number; // SERIAL
+  id: number;
   milestone_id: number;
-  uploader_id: string; // UUID
+  uploader_id: string;
   file_url: string;
   description: string | null;
-  created_at: string; // TIMESTAMPTZ
+  created_at: string;
+}
+
+// Type pour la création de projet (onboarding step 1)
+export interface CreateProjectStep1 {
+  client_id: string;
+  project_type: ProjectType;
+}
+
+// Type pour la mise à jour du projet (onboarding step 2)
+export interface UpdateProjectStep2 {
+  title: string;
+  description: string;
+  onboarding_completed: true;
 }

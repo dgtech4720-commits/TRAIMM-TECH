@@ -1,13 +1,17 @@
 import { supabase } from '../lib/supabase';
-import type { Project, ProjectStatus, ProjectWithTotals } from '../types/database';
+import type { Project, ProjectStatus, ProjectWithTotals, ProjectType } from '../types/database';
 
-// Définir les colonnes à récupérer de la VUE projects_with_totals
-const PROJECTS_WITH_TOTALS_SELECT_QUERY = `
+import { profilesService } from './profiles.service';
+
+// Colonnes pour la vue projects_with_totals
+const PROJECTS_WITH_TOTALS_SELECT = `
   id,
   client_id,
   manager_id,
   title,
   description,
+  project_type,
+  onboarding_completed,
   status,
   total_price,
   deposit_type,
@@ -22,35 +26,29 @@ const PROJECTS_WITH_TOTALS_SELECT_QUERY = `
 `;
 
 /**
- * Récupère un projet par son ID, incluant le total des prix des jalons.
- * Interroge la vue `projects_with_totals`.
- * @param projectId L'ID du projet.
- * @returns Le projet avec le total ou null si non trouvé.
+ * Récupère un projet par son ID (via la vue avec totaux)
  */
 async function getProjectById(projectId: number): Promise<ProjectWithTotals | null> {
   const { data, error } = await supabase
-    .from('projects_with_totals') // Changement ici: interroge la vue
-    .select(PROJECTS_WITH_TOTALS_SELECT_QUERY)
+    .from('projects_with_totals')
+    .select(PROJECTS_WITH_TOTALS_SELECT)
     .eq('id', projectId)
     .single();
 
   if (error) {
-    console.error(`Error fetching project with id ${projectId}:`, error.message);
+    console.error(`Error fetching project ${projectId}:`, error.message);
     return null;
   }
   return data;
 }
 
 /**
- * Récupère tous les projets pour un client spécifique, incluant le total des prix des jalons.
- * Interroge la vue `projects_with_totals`.
- * @param clientId L'ID du client (depuis profiles.id).
- * @returns Une liste de projets avec les totaux.
+ * Récupère tous les projets d'un client
  */
 async function getProjectsForClient(clientId: string): Promise<ProjectWithTotals[]> {
   const { data, error } = await supabase
-    .from('projects_with_totals') // Changement ici: interroge la vue
-    .select(PROJECTS_WITH_TOTALS_SELECT_QUERY)
+    .from('projects_with_totals')
+    .select(PROJECTS_WITH_TOTALS_SELECT)
     .eq('client_id', clientId)
     .order('created_at', { ascending: false });
 
@@ -62,21 +60,139 @@ async function getProjectsForClient(clientId: string): Promise<ProjectWithTotals
 }
 
 /**
- * Crée un nouveau projet. Le statut initial est 'BROUILLON'.
- * Opère sur la table `projects`.
- * @param projectData Les données nécessaires pour créer le projet.
- * @returns Le projet nouvellement créé.
+ * Vérifie si un client a un projet avec onboarding incomplet
  */
-async function createProject(
-  projectData: { client_id: string; title: string; description?: string }
+async function getIncompleteOnboardingProject(clientId: string): Promise<Project | null> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('onboarding_completed', false)
+    .single();
+
+  if (error) {
+    // Pas d'erreur si aucun projet trouvé
+    if (error.code === 'PGRST116') return null;
+    console.error('Error checking incomplete onboarding:', error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Vérifie si un client a au moins un projet avec onboarding complété
+ */
+async function hasCompletedOnboarding(clientId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('onboarding_completed', true)
+    .limit(1);
+
+  if (error) {
+    console.error('Error checking completed onboarding:', error.message);
+    return false;
+  }
+  return data && data.length > 0;
+}
+
+/**
+ * Assure qu'un profil existe pour l'utilisateur avant de créer un projet
+ */
+async function ensureProfileExists(userId: string): Promise<boolean> {
+  const profile = await profilesService.getProfile(userId);
+  if (profile) return true;
+
+  // Si pas de profil, on tente de le créer (récupère l'email via auth si possible, sinon placeholder)
+  const { data: { user } } = await supabase.auth.getUser();
+  const email = user?.email || 'User';
+
+  return await profilesService.createProfile(userId, email);
+}
+
+/**
+ * Crée un nouveau projet (Onboarding Step 1)
+ * Crée un projet en BROUILLON avec seulement le type
+ */
+async function createProjectStep1(
+  clientId: string,
+  projectType: ProjectType
+): Promise<Project | null> {
+  // Vérification/Création du profil
+  const profileOk = await ensureProfileExists(clientId);
+  if (!profileOk) {
+    console.error('Failed to ensure profile existence');
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('projects')
+    .insert({
+      client_id: clientId,
+      project_type: projectType,
+      title: '', // Sera rempli step 2
+      status: 'BROUILLON',
+      onboarding_completed: false,
+    } as any)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Error creating project step 1:', error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Complète l'onboarding (Step 2)
+ * Ajoute titre, description et marque l'onboarding comme terminé
+ */
+async function completeOnboarding(
+  projectId: number,
+  title: string,
+  description: string
 ): Promise<Project | null> {
   const { data, error } = await supabase
-    .from('projects') // Opère sur la table
+    .from('projects')
+    .update({
+      title,
+      description,
+      onboarding_completed: true,
+    } as any)
+    .eq('id', projectId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Error completing onboarding:', error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Crée un nouveau projet complet
+ */
+async function createProject(
+  projectData: { client_id: string; title: string; description?: string; project_type: ProjectType }
+): Promise<Project | null> {
+  // Vérification/Création du profil
+  const profileOk = await ensureProfileExists(projectData.client_id);
+  if (!profileOk) {
+    console.error('Failed to ensure profile existence');
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('projects')
     .insert({
       ...projectData,
       status: 'BROUILLON',
-    })
-    .select('*') // Sélectionne les colonnes par défaut de la table Project
+      onboarding_completed: true,
+    } as any)
+    .select('*')
     .single();
 
   if (error) {
@@ -87,21 +203,17 @@ async function createProject(
 }
 
 /**
- * Met à jour des champs spécifiques d'un projet.
- * Opère sur la table `projects`.
- * @param projectId L'ID du projet à mettre à jour.
- * @param updates Un objet contenant les champs à mettre à jour.
- * @returns Le projet mis à jour.
+ * Met à jour un projet
  */
 async function updateProject(
   projectId: number,
   updates: Partial<Omit<Project, 'id'>>
 ): Promise<Project | null> {
   const { data, error } = await supabase
-    .from('projects') // Opère sur la table
-    .update(updates)
+    .from('projects')
+    .update(updates as any)
     .eq('id', projectId)
-    .select('*') // Sélectionne les colonnes par défaut de la table Project
+    .select('*')
     .single();
 
   if (error) {
@@ -112,10 +224,7 @@ async function updateProject(
 }
 
 /**
- * Met à jour spécifiquement le statut d'un projet.
- * @param projectId L'ID du projet.
- * @param status Le nouveau statut du projet.
- * @returns Le projet mis à jour.
+ * Met à jour le statut d'un projet
  */
 async function updateProjectStatus(
   projectId: number,
@@ -125,9 +234,7 @@ async function updateProjectStatus(
 }
 
 /**
- * Supprime un projet.
- * @param projectId L'ID du projet à supprimer.
- * @returns true si la suppression a réussi, sinon false.
+ * Supprime un projet
  */
 async function deleteProject(projectId: number): Promise<boolean> {
   const { error } = await supabase
@@ -142,10 +249,13 @@ async function deleteProject(projectId: number): Promise<boolean> {
   return true;
 }
 
-// On exporte un objet unifié qui constitue notre service de projets.
 export const projectsService = {
   getProjectById,
   getProjectsForClient,
+  getIncompleteOnboardingProject,
+  hasCompletedOnboarding,
+  createProjectStep1,
+  completeOnboarding,
   createProject,
   updateProject,
   updateProjectStatus,
