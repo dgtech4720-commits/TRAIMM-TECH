@@ -1,10 +1,15 @@
 -- #################################################
--- ###      SCHEMA V3.1 - DGTECH / TRAIMM-TECH   ###
+-- ###      SCHEMA V3.2 - DGTECH / TRAIMM-TECH   ###
 -- #################################################
--- Version corrigée suite à l'erreur de colonne générée.
--- Utilise une VIEW pour les totaux de projet.
+-- Ajouts principaux :
+-- - project_type
+-- - onboarding_completed
+-- - clarification RLS conceptuelle
+-- - pas de refonte destructive
 
--- Supprime les anciennes tables et vues si elles existent pour un redémarrage propre
+-- ============================================
+-- CLEAN START (DEV ONLY)
+-- ============================================
 DROP VIEW IF EXISTS public.projects_with_totals;
 DROP TABLE IF EXISTS public.deliverables CASCADE;
 DROP TABLE IF EXISTS public.project_chat_messages CASCADE;
@@ -13,7 +18,7 @@ DROP TABLE IF EXISTS public.projects CASCADE;
 DROP TABLE IF EXISTS public.profiles CASCADE;
 
 -- #################################################
--- ###            TABLE DES UTILISATEURS         ###
+-- ###            TABLE DES PROFILS             ###
 -- #################################################
 CREATE TABLE public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -22,33 +27,57 @@ CREATE TABLE public.profiles (
   avatar_url TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
-COMMENT ON TABLE public.profiles IS 'Stores public profile information for each user.';
+
+COMMENT ON TABLE public.profiles IS 'Public profile linked to Supabase auth.users';
 
 -- #################################################
--- ###             TABLE DES PROJETS (corrigée)  ###
+-- ###             TABLE DES PROJETS            ###
 -- #################################################
 CREATE TABLE public.projects (
   id SERIAL PRIMARY KEY,
+
   client_id UUID NOT NULL REFERENCES public.profiles(id),
   manager_id UUID REFERENCES public.profiles(id),
+
   title TEXT NOT NULL,
   description TEXT,
-  status TEXT NOT NULL DEFAULT 'BROUILLON' CHECK (status IN ('BROUILLON', 'SOUMIS', 'CHIFFRAGE', 'EN_NEGOCIATION', 'EN_ATTENTE_PAIEMENT', 'ACTIF', 'EN_PAUSE', 'TERMINÉ', 'EN_GARANTIE', 'ANNULÉ')),
-  
-  -- La colonne `total_price` a été retirée pour être remplacée par une vue.
-  
+
+  -- 🔑 ONBOARDING
+  project_type TEXT NOT NULL
+    CHECK (project_type IN ('ACADEMIC', 'CLIENT', 'PERSONAL')),
+
+  onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE,
+
+  status TEXT NOT NULL DEFAULT 'BROUILLON'
+    CHECK (status IN (
+      'BROUILLON',
+      'SOUMIS',
+      'CHIFFRAGE',
+      'EN_NEGOCIATION',
+      'EN_ATTENTE_PAIEMENT',
+      'ACTIF',
+      'EN_PAUSE',
+      'TERMINÉ',
+      'EN_GARANTIE',
+      'ANNULÉ'
+    )),
+
+  -- 💰 PAIEMENT
   deposit_type TEXT CHECK (deposit_type IN ('percentage', 'fixed')),
-  deposit_value NUMERIC(10, 2),
+  deposit_value NUMERIC(10,2),
   deposit_paid BOOLEAN NOT NULL DEFAULT FALSE,
   final_balance_paid BOOLEAN NOT NULL DEFAULT FALSE,
   payment_method_used TEXT,
 
+  -- 🕒 TIMELINE
   created_at TIMESTAMPTZ DEFAULT NOW(),
   submitted_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ
 );
-COMMENT ON TABLE public.projects IS 'Central table for managing projects. Does not contain calculated totals.';
+
+COMMENT ON TABLE public.projects IS
+'Central business entity. Onboarding is tied to project creation.';
 
 -- #################################################
 -- ###             TABLE DES JALONS              ###
@@ -57,28 +86,42 @@ CREATE TABLE public.milestones (
   id SERIAL PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
   developer_id UUID REFERENCES public.profiles(id),
+
   title TEXT NOT NULL,
   description TEXT,
-  status TEXT NOT NULL DEFAULT 'A_FAIRE' CHECK (status IN ('A_FAIRE', 'EN_COURS', 'BLOQUE', 'EN_REVUE', 'EN_CORRECTION', 'VALIDÉ')),
-  price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+
+  status TEXT NOT NULL DEFAULT 'A_FAIRE'
+    CHECK (status IN (
+      'A_FAIRE',
+      'EN_COURS',
+      'BLOQUE',
+      'EN_REVUE',
+      'EN_CORRECTION',
+      'VALIDÉ'
+    )),
+
+  price NUMERIC(10,2) NOT NULL DEFAULT 0,
   due_date DATE
 );
-COMMENT ON TABLE public.milestones IS 'Defines a specific, deliverable stage of a project with a price.';
+
+COMMENT ON TABLE public.milestones IS
+'Milestones represent paid, reviewable chunks of work.';
 
 -- #################################################
--- ###      VUE CALCULÉE POUR LES TOTAUX         ###
+-- ###      VUE CALCULÉE POUR LE PRIX TOTAL      ###
 -- #################################################
 CREATE VIEW public.projects_with_totals AS
 SELECT
   p.*,
-  (SELECT COALESCE(SUM(m.price), 0) FROM public.milestones m WHERE m.project_id = p.id)::NUMERIC(10,2) AS total_price
+  (
+    SELECT COALESCE(SUM(m.price), 0)
+    FROM public.milestones m
+    WHERE m.project_id = p.id
+  )::NUMERIC(10,2) AS total_price
 FROM public.projects p;
 
-COMMENT ON VIEW public.projects_with_totals IS 'Extends projects with dynamically calculated total_price from its milestones.';
-
-
 -- #################################################
--- ###     TABLE DES MESSAGES ("Memo Magique")     ###
+-- ###          CHAT PROJET (MEMO MAGIQUE)       ###
 -- #################################################
 CREATE TABLE public.project_chat_messages (
   id BIGSERIAL PRIMARY KEY,
@@ -88,10 +131,9 @@ CREATE TABLE public.project_chat_messages (
   is_formalized BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
-COMMENT ON TABLE public.project_chat_messages IS 'Stores the informal chat history for a project.';
 
 -- #################################################
--- ###           TABLE DES LIVRABLES             ###
+-- ###              LIVRABLES                   ###
 -- #################################################
 CREATE TABLE public.deliverables (
   id SERIAL PRIMARY KEY,
@@ -101,7 +143,6 @@ CREATE TABLE public.deliverables (
   description TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
-COMMENT ON TABLE public.deliverables IS 'Files and other proofs of work attached to a milestone.';
 
 -- ============================================
 -- INDEXES
@@ -110,7 +151,6 @@ CREATE INDEX ON public.projects(client_id);
 CREATE INDEX ON public.projects(manager_id);
 CREATE INDEX ON public.projects(status);
 CREATE INDEX ON public.milestones(project_id);
-CREATE INDEX ON public.milestones(developer_id);
 CREATE INDEX ON public.project_chat_messages(project_id);
 
 -- ============================================
@@ -122,21 +162,26 @@ ALTER TABLE public.milestones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.project_chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.deliverables ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow read access to all users" ON public.profiles FOR SELECT USING (true);
-CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+-- ⚠️ POLICIES SIMPLIFIÉES (À DURCIR AVANT PROD)
 
-CREATE POLICY "Allow full access to project members" ON public.projects
-  USING ( auth.uid() = client_id OR auth.uid() = manager_id );
+CREATE POLICY "Profiles are readable"
+ON public.profiles FOR SELECT
+USING (true);
 
-CREATE POLICY "Allow read access to project members" ON public.milestones
-  USING ( EXISTS (SELECT 1 FROM projects WHERE projects.id = milestones.project_id) );
+CREATE POLICY "User can update own profile"
+ON public.profiles FOR UPDATE
+USING (auth.uid() = id);
 
-CREATE POLICY "Allow access to project members" ON public.project_chat_messages
-  USING ( EXISTS (SELECT 1 FROM projects WHERE projects.id = project_chat_messages.project_id) );
+CREATE POLICY "Project access for client or manager"
+ON public.projects
+USING (
+  auth.uid() = client_id
+  OR auth.uid() = manager_id
+);
 
--- ============================================
--- TRIGGER NOUVEL UTILISATEUR
--- ============================================
+-- #################################################
+-- ###        TRIGGER NOUVEL UTILISATEUR         ###
+-- #################################################
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -152,6 +197,6 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW
-  EXECUTE FUNCTION public.handle_new_user();
+AFTER INSERT ON auth.users
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_new_user();
