@@ -2,12 +2,14 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useEffect, useState } from 'react';
 import { projectsService } from '../services/projects.service';
+import { profilesService } from '../services/profiles.service';
+import { ROLES } from '../types/database';
 import type { ReactNode } from 'react';
 import { Loader } from 'lucide-react';
 
 interface ProtectedRouteProps {
     children: ReactNode;
-    requiresOnboarding?: boolean; // Si true, redirige vers onboarding si pas de projet
+    requiresOnboarding?: boolean;
 }
 
 export function ProtectedRoute({ children, requiresOnboarding = true }: ProtectedRouteProps) {
@@ -24,6 +26,15 @@ export function ProtectedRoute({ children, requiresOnboarding = true }: Protecte
             }
 
             try {
+                // Vérifier le rôle : seuls les clients passent par l'onboarding
+                const profile = await profilesService.getProfile(user.id);
+                if (profile && profile.role !== ROLES.CLIENT) {
+                    // Manager ou Developer → pas d'onboarding
+                    setHasCompletedOnboarding(true);
+                    setCheckingOnboarding(false);
+                    return;
+                }
+
                 const completed = await projectsService.hasCompletedOnboarding(user.id);
                 setHasCompletedOnboarding(completed);
             } catch (error) {
@@ -61,14 +72,13 @@ export function ProtectedRoute({ children, requiresOnboarding = true }: Protecte
     // Page d'onboarding - ne pas rediriger
     const isOnboardingPage = location.pathname.startsWith('/onboarding');
     if (isOnboardingPage) {
-        // Si l'utilisateur a déjà complété l'onboarding et essaie d'y accéder, rediriger vers dashboard
         if (hasCompletedOnboarding) {
             return <Navigate to="/dashboard" replace />;
         }
         return <>{children}</>;
     }
 
-    // Pages protégées nécessitant l'onboarding
+    // Pages protégées nécessitant l'onboarding (clients uniquement)
     if (requiresOnboarding && hasCompletedOnboarding === false) {
         return <Navigate to="/onboarding" replace />;
     }

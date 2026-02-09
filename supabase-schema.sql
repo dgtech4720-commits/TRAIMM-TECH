@@ -178,10 +178,18 @@ ON public.profiles FOR INSERT
 WITH CHECK (auth.uid() = id);
 
 CREATE POLICY "Project access for client or manager"
-ON public.projects
+ON public.projects FOR SELECT
 USING (
   auth.uid() = client_id
   OR auth.uid() = manager_id
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('manager', 'developer'))
+);
+
+CREATE POLICY "Manager can update projects"
+ON public.projects FOR UPDATE
+USING (
+  auth.uid() = manager_id
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'manager')
 );
 
 -- #################################################

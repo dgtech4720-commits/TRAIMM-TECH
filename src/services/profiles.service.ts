@@ -99,4 +99,21 @@ export const profilesService = {
 
         return true;
     },
+
+    /**
+     * Récupère tous les membres de l'équipe (managers + développeurs)
+     */
+    async getTeamMembers(): Promise<Profile[]> {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('role', ['manager', 'developer'])
+            .order('full_name');
+
+        if (error) {
+            console.error('Error fetching team members:', error.message);
+            return [];
+        }
+        return data || [];
+    },
 };

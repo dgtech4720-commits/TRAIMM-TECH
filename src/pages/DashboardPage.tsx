@@ -9,12 +9,40 @@ import {
 
 import { useAuth } from "../contexts/AuthContext";
 import { projectsService } from "../services/projects.service";
+import { profilesService } from "../services/profiles.service";
 import { milestonesService } from "../services/milestones.service";
 import { messagesService, type MessageWithDetails } from "../services/messages.service";
 import { documentsService, type DeliverableWithDetails } from "../services/documents.service";
 
-import type { ProjectWithTotals } from "../types/database";
-import { PROJECT_STATUSES } from "../types/database";
+import type { ProjectWithTotals, Role } from "../types/database";
+import { PROJECT_STATUSES, ROLES } from "../types/database";
+
+const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  'BROUILLON': { bg: 'bg-gray-500/20', text: 'text-gray-400', border: 'border-gray-500/20' },
+  'SOUMIS': { bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/20' },
+  'CHIFFRAGE': { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/20' },
+  'EN_NEGOCIATION': { bg: 'bg-orange-500/20', text: 'text-orange-400', border: 'border-orange-500/20' },
+  'EN_ATTENTE_PAIEMENT': { bg: 'bg-yellow-500/20', text: 'text-yellow-400', border: 'border-yellow-500/20' },
+  'ACTIF': { bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/20' },
+  'EN_PAUSE': { bg: 'bg-gray-500/20', text: 'text-gray-400', border: 'border-gray-500/20' },
+  'TERMINÉ': { bg: 'bg-green-500/20', text: 'text-green-400', border: 'border-green-500/20' },
+  'EN_GARANTIE': { bg: 'bg-teal-500/20', text: 'text-teal-400', border: 'border-teal-500/20' },
+  'ANNULÉ': { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/20' },
+};
+const STATUS_LABELS: Record<string, string> = {
+  'BROUILLON': 'Brouillon',
+  'SOUMIS': 'Soumis',
+  'CHIFFRAGE': 'Chiffrage',
+  'EN_NEGOCIATION': 'En négociation',
+  'EN_ATTENTE_PAIEMENT': 'Attente paiement',
+  'ACTIF': 'Actif',
+  'EN_PAUSE': 'En pause',
+  'TERMINÉ': 'Terminé',
+  'EN_GARANTIE': 'En garantie',
+  'ANNULÉ': 'Annulé',
+};
+const getStatusColor = (status: string) => STATUS_COLORS[status] || STATUS_COLORS['BROUILLON'];
+const getStatusLabel = (status: string) => STATUS_LABELS[status] || status;
 
 type ViewType = 'dashboard' | 'projects' | 'messages' | 'documents' | 'settings' | 'offers';
 
@@ -23,6 +51,8 @@ export default function Dashboard() {
   const { user, signOut } = useAuth();
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [userRole, setUserRole] = useState<Role>(ROLES.CLIENT);
+  const [teamMembers, setTeamMembers] = useState<{ id: string; full_name: string | null }[]>([]);
 
   // Data State
   const [projects, setProjects] = useState<ProjectWithTotals[]>([]);
@@ -47,37 +77,48 @@ export default function Dashboard() {
     try {
       setIsLoading(true);
 
-      // Parallel fetching for performance
-      const [userProjects, tasksCount, msgs, unreadMsgs, docs, totalDocs] = await Promise.all([
-        projectsService.getProjectsForClient(user.id),
-        milestonesService.getCompletedMilestonesCount(user.id),
-        messagesService.getRecentMessages(user.id, 10),
-        messagesService.getUnreadMessagesCount(user.id),
-        documentsService.getRecentDocuments(user.id, 10),
-        documentsService.getTotalDocumentsCount(user.id)
-      ]);
+      // Detect role
+      const profile = await profilesService.getProfile(user.id);
+      const role = (profile?.role || ROLES.CLIENT) as Role;
+      setUserRole(role);
 
-      setProjects(userProjects);
-      setRecentMessages(msgs);
-      setRecentDocuments(docs);
-
-      // Synthesize notifications from messages
-      const newNotifs = msgs.slice(0, 5).map(msg => ({
-        id: `msg-${msg.id}`,
-        title: "Nouveau message",
-        desc: `${msg.sender?.full_name || 'Support'}: ${msg.content}`,
-        time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        icon: MessageSquare,
-        color: "text-amber-400"
-      }));
-      setNotifications(newNotifs);
-
-      setStats({
-        completedTasks: tasksCount,
-        unreadMessages: unreadMsgs,
-        totalDocuments: totalDocs
-      });
-
+      if (role === ROLES.CLIENT) {
+        // CLIENT: fetch own projects + stats
+        const [userProjects, tasksCount, msgs, unreadMsgs, docs, totalDocs] = await Promise.all([
+          projectsService.getProjectsForClient(user.id),
+          milestonesService.getCompletedMilestonesCount(user.id),
+          messagesService.getRecentMessages(user.id, 10),
+          messagesService.getUnreadMessagesCount(user.id),
+          documentsService.getRecentDocuments(user.id, 10),
+          documentsService.getTotalDocumentsCount(user.id)
+        ]);
+        setProjects(userProjects);
+        setRecentMessages(msgs);
+        setRecentDocuments(docs);
+        const newNotifs = msgs.slice(0, 5).map(msg => ({
+          id: `msg-${msg.id}`,
+          title: "Nouveau message",
+          desc: `${msg.sender?.full_name || 'Support'}: ${msg.content}`,
+          time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          icon: MessageSquare,
+          color: "text-amber-400"
+        }));
+        setNotifications(newNotifs);
+        setStats({ completedTasks: tasksCount, unreadMessages: unreadMsgs, totalDocuments: totalDocs });
+      } else {
+        // MANAGER: fetch ALL projects + team members
+        const [allProjects, members] = await Promise.all([
+          projectsService.getAllProjects(),
+          profilesService.getTeamMembers()
+        ]);
+        setProjects(allProjects);
+        setTeamMembers(members);
+        setStats({
+          completedTasks: allProjects.filter((p: any) => p.status === PROJECT_STATUSES.COMPLETED).length,
+          unreadMessages: allProjects.filter((p: any) => p.status === PROJECT_STATUSES.SUBMITTED).length,
+          totalDocuments: allProjects.filter((p: any) => p.status === PROJECT_STATUSES.ACTIVE).length
+        });
+      }
     } catch (err) {
       console.error("Error loading dashboard data:", err);
     } finally {
@@ -141,7 +182,15 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const navItems = [
+  const isManager = userRole !== ROLES.CLIENT;
+
+  const navItems = isManager ? [
+    { id: 'dashboard', icon: Home, label: "Tableau de bord" },
+    { id: 'projects', icon: FolderKanban, label: "Projets" },
+    { id: 'messages', icon: MessageSquare, label: "Messages" },
+    { id: 'documents', icon: FileText, label: "Documents" },
+    { id: 'settings', icon: Settings, label: "Paramètres" },
+  ] : [
     { id: 'dashboard', icon: Home, label: "Tableau de bord" },
     { id: 'projects', icon: FolderKanban, label: "Mes projets" },
     { id: 'messages', icon: MessageSquare, label: "Messages", badge: stats.unreadMessages > 0 ? stats.unreadMessages : undefined },
@@ -152,6 +201,29 @@ export default function Dashboard() {
 
   // --- RENDU DES VUES ---
 
+  const managerStats = isManager ? [
+    { label: "Projets soumis", value: stats.unreadMessages, icon: FolderKanban, color: "text-blue-400", bg: "bg-blue-500/20" },
+    { label: "Projets actifs", value: stats.totalDocuments, icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/20" },
+    { label: "Projets terminés", value: stats.completedTasks, icon: CheckCircle2, color: "text-green-400", bg: "bg-green-500/20" },
+    { label: "Total projets", value: projects.length, icon: FileText, color: "text-amber-400", bg: "bg-amber-500/20" },
+  ] : [
+    { label: "Projets actifs", value: projects.filter(p => p.status !== PROJECT_STATUSES.DRAFT && p.status !== PROJECT_STATUSES.CANCELLED && p.status !== PROJECT_STATUSES.COMPLETED).length, icon: FolderKanban, color: "text-amber-400", bg: "bg-amber-500/20" },
+    { label: "Tâches terminées", value: stats.completedTasks, icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/20" },
+    { label: "Messages non lus", value: stats.unreadMessages, icon: MessageSquare, color: "text-yellow-400", bg: "bg-yellow-500/20" },
+    { label: "Documents", value: stats.totalDocuments, icon: FileText, color: "text-cyan-400", bg: "bg-cyan-500/20" },
+  ];
+
+  const handleStatusChange = async (projectId: number, newStatus: string) => {
+    await projectsService.updateProjectStatus(projectId, newStatus as any);
+    await loadDashboardData();
+  };
+
+  const handleAssignMember = async (projectId: number, memberId: string) => {
+    if (!memberId) return;
+    await projectsService.assignManager(projectId, memberId);
+    await loadDashboardData();
+  };
+
   const renderDashboard = () => (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -159,40 +231,33 @@ export default function Dashboard() {
           <h1 className="text-3xl md:text-4xl font-bold text-white">
             Bonjour, {user?.email?.split('@')[0] ?? 'Utilisateur'}
           </h1>
-          <p className="text-gray-400 mt-2">Voici un aperçu de vos projets et statistiques.</p>
+          <p className="text-gray-400 mt-2">{isManager ? 'Vue d\'ensemble des projets.' : 'Voici un aperçu de vos projets et statistiques.'}</p>
         </div>
-        <button
-          className="px-6 py-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-gray-900 font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-          onClick={() => navigate('/create-project')}
-        >
-          <Plus className="w-5 h-5" /> Nouveau projet
-        </button>
+        {!isManager && (
+          <button
+            className="px-6 py-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-gray-900 font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+            onClick={() => navigate('/create-project')}
+          >
+            <Plus className="w-5 h-5" /> Nouveau projet
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          { label: "Projets actifs", value: projects.filter(p => p.status !== PROJECT_STATUSES.DRAFT && p.status !== PROJECT_STATUSES.CANCELLED && p.status !== PROJECT_STATUSES.COMPLETED).length, icon: FolderKanban, trend: "--", color: "text-amber-400", bg: "bg-amber-500/20" },
-          { label: "Tâches terminées", value: stats.completedTasks.toString(), icon: CheckCircle2, trend: "--", color: "text-emerald-400", bg: "bg-emerald-500/20" },
-          { label: "Messages non lus", value: stats.unreadMessages.toString(), icon: MessageSquare, trend: "--", color: "text-yellow-400", bg: "bg-yellow-500/20" },
-          { label: "Documents", value: stats.totalDocuments.toString(), icon: FileText, trend: "--", color: "text-cyan-400", bg: "bg-cyan-500/20" },
-        ].map((stat) => (
+        {managerStats.map((stat) => (
           <div key={stat.label} className="bg-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-800 hover:border-amber-500/50 transition-all p-6">
             <div className={`w-12 h-12 rounded-xl ${stat.bg} flex items-center justify-center mb-4`}>
               <stat.icon className={`w-6 h-6 ${stat.color}`} />
             </div>
             <div className="text-3xl font-bold text-white">{stat.value}</div>
             <div className="text-sm text-gray-400 font-medium">{stat.label}</div>
-            <div className="text-xs text-amber-400 mt-2 font-semibold flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" />
-              {stat.trend}
-            </div>
           </div>
         ))}
       </div>
 
       <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-800 p-6">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-white">Projets récents</h2>
+          <h2 className="text-xl font-bold text-white">{isManager ? 'Tous les projets' : 'Projets récents'}</h2>
           <button className="text-amber-400 hover:text-amber-300 text-sm font-semibold" onClick={() => setCurrentView('projects')}>Voir tout →</button>
         </div>
         {renderProjectList()}
@@ -206,95 +271,133 @@ export default function Dashboard() {
 
     return (
       <div className="space-y-3">
-        {projects.map((project) => (
-          <div
-            key={project.id}
-            className={`group rounded-xl bg-gray-800/50 border border-gray-700 hover:border-amber-500/50 transition-all overflow-hidden ${allowExpand && expandedProjectId === project.id ? 'bg-gray-800 border-amber-500/30' : ''}`}
-            onClick={() => allowExpand ? setExpandedProjectId(expandedProjectId === project.id ? null : project.id) : null}
-          >
-            {/* HEADER */}
-            <div className={`flex items-center gap-4 p-4 flex-wrap sm:flex-nowrap ${allowExpand ? 'cursor-pointer' : ''}`}>
-              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-500/20 to-yellow-500/20 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform flex-shrink-0">
-                <FolderKanban className="w-6 h-6" />
-              </div>
-              <div className="flex-1 min-w-[200px]">
-                <h3 className="font-semibold text-white text-lg">{project.title}</h3>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-gray-500">Modifié le {new Date(project.created_at).toLocaleDateString()}</span>
-                  <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase border border-amber-500/20 flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> {project.status}
-                  </span>
+        {projects.map((project: any) => {
+          const sc = getStatusColor(project.status);
+          return (
+            <div
+              key={project.id}
+              className={`group rounded-xl bg-gray-800/50 border border-gray-700 hover:border-amber-500/50 transition-all overflow-hidden ${allowExpand && expandedProjectId === project.id ? 'bg-gray-800 border-amber-500/30' : ''}`}
+              onClick={() => allowExpand ? setExpandedProjectId(expandedProjectId === project.id ? null : project.id) : null}
+            >
+              {/* HEADER */}
+              <div className={`flex items-center gap-4 p-4 flex-wrap sm:flex-nowrap ${allowExpand ? 'cursor-pointer' : ''}`}>
+                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-500/20 to-yellow-500/20 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform flex-shrink-0">
+                  <FolderKanban className="w-6 h-6" />
                 </div>
-              </div>
-
-              {/* ACTIONS */}
-              <div className="flex items-center gap-2 ml-auto pl-2">
-                {project.status === PROJECT_STATUSES.DRAFT && (
-                  <button
-                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-gray-900 text-xs font-bold rounded-lg transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 whitespace-nowrap"
-                    onClick={(e) => handleOpenSubmitModal(project, e)}
-                    disabled={submittingId === project.id}
-                  >
-                    <Send className="w-3 h-3" />
-                    Demander une étude
-                  </button>
-                )}
-
-                {project.status === PROJECT_STATUSES.SUBMITTED && (
-                  <a
-                    href="https://wa.me/237654031589"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-4 py-2 border border-green-500/50 bg-green-500/10 text-green-400 hover:bg-green-500/20 text-xs font-bold rounded-lg transition-all flex items-center gap-2 whitespace-nowrap"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <MessageSquare className="w-3 h-3" />
-                    WhatsApp
-                  </a>
-                )}
-
-                {allowExpand && (
-                  <ChevronRight className={`w-5 h-5 text-gray-500 group-hover:text-amber-400 transition-transform duration-200 ml-2 ${expandedProjectId === project.id ? 'rotate-90' : ''}`} />
-                )}
-              </div>
-            </div>
-
-            {/* EXPANDED CONTENT */}
-            {allowExpand && expandedProjectId === project.id && (
-              <div className="px-4 pb-4 pt-0 border-t border-gray-700/50 animate-in slide-in-from-top-2 duration-200">
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Description</span>
-                    <p className="text-gray-300 italic bg-gray-900/50 p-3 rounded-lg border border-gray-800">
-                      {project.description || "Aucune description fournie pour ce projet."}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Type de projet</span>
-                    <p className="text-amber-400 font-medium bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20 inline-block">
-                      {project.project_type}
-                    </p>
+                <div className="flex-1 min-w-[200px]">
+                  <h3 className="font-semibold text-white text-lg">{project.title}</h3>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {isManager && project.client?.full_name && (
+                      <span className="text-xs text-gray-500">Client: <span className="text-gray-300">{project.client.full_name}</span></span>
+                    )}
+                    <span className="text-xs text-gray-500">Modifié le {new Date(project.created_at).toLocaleDateString()}</span>
+                    <span className={`px-2 py-0.5 rounded-full ${sc.bg} ${sc.text} text-[10px] font-bold uppercase ${sc.border} border flex items-center gap-1`}>
+                      <Clock className="w-3 h-3" /> {getStatusLabel(project.status)}
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-700/50">
-                  {project.status === PROJECT_STATUSES.DRAFT && (
+                {/* ACTIONS */}
+                <div className="flex items-center gap-2 ml-auto pl-2 flex-wrap">
+                  {/* Client actions */}
+                  {!isManager && project.status === PROJECT_STATUSES.DRAFT && (
                     <button
-                      className="px-4 py-2 border border-blue-500/50 text-blue-400 hover:bg-blue-500/10 text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingProject(project);
-                      }}
+                      className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-gray-900 text-xs font-bold rounded-lg transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 whitespace-nowrap"
+                      onClick={(e) => handleOpenSubmitModal(project, e)}
+                      disabled={submittingId === project.id}
                     >
-                      <Settings className="w-3 h-3" />
-                      Modifier le projet
+                      <Send className="w-3 h-3" />
+                      Demander une étude
                     </button>
+                  )}
+                  {!isManager && project.status === PROJECT_STATUSES.SUBMITTED && (
+                    <a
+                      href="https://wa.me/237654031589"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2 border border-green-500/50 bg-green-500/10 text-green-400 hover:bg-green-500/20 text-xs font-bold rounded-lg transition-all flex items-center gap-2 whitespace-nowrap"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MessageSquare className="w-3 h-3" />
+                      WhatsApp
+                    </a>
+                  )}
+
+                  {/* Manager actions */}
+                  {isManager && (
+                    <div className="flex items-center gap-2">
+                      <div className="relative">
+                        <User className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-emerald-400 pointer-events-none" />
+                        <select
+                          className="pl-8 pr-3 py-2 rounded-xl bg-gray-800/80 border border-gray-600/50 text-white text-xs font-medium focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 appearance-none cursor-pointer hover:border-gray-500 transition-all min-w-[140px]"
+                          value={project.manager_id || ''}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => handleAssignMember(project.id, e.target.value)}
+                        >
+                          <option value="">Assigner à…</option>
+                          {teamMembers.map((m) => (
+                            <option key={m.id} value={m.id}>{m.full_name || m.id.slice(0, 8)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="relative">
+                        <Clock className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-400 pointer-events-none" />
+                        <select
+                          className="pl-8 pr-3 py-2 rounded-xl bg-gray-800/80 border border-gray-600/50 text-white text-xs font-medium focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 appearance-none cursor-pointer hover:border-gray-500 transition-all min-w-[140px]"
+                          value={project.status}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => handleStatusChange(project.id, e.target.value)}
+                        >
+                          {Object.entries(PROJECT_STATUSES).map(([key, val]) => (
+                            <option key={key} value={val}>{getStatusLabel(val)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                  {allowExpand && (
+                    <ChevronRight className={`w-5 h-5 text-gray-500 group-hover:text-amber-400 transition-transform duration-200 ml-2 ${expandedProjectId === project.id ? 'rotate-90' : ''}`} />
                   )}
                 </div>
               </div>
-            )}
-          </div>
-        ))}
+
+              {/* EXPANDED CONTENT */}
+              {allowExpand && expandedProjectId === project.id && (
+                <div className="px-4 pb-4 pt-0 border-t border-gray-700/50 animate-in slide-in-from-top-2 duration-200">
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Description</span>
+                      <p className="text-gray-300 italic bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                        {project.description || "Aucune description fournie pour ce projet."}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Type de projet</span>
+                      <p className="text-amber-400 font-medium bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20 inline-block">
+                        {project.project_type}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-700/50">
+                    {!isManager && project.status === PROJECT_STATUSES.DRAFT && (
+                      <button
+                        className="px-4 py-2 border border-blue-500/50 text-blue-400 hover:bg-blue-500/10 text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingProject(project);
+                        }}
+                      >
+                        <Settings className="w-3 h-3" />
+                        Modifier le projet
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -573,13 +676,15 @@ export default function Dashboard() {
             {currentView === 'projects' && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-white">Mes Projets</h2>
-                  <button
-                    onClick={() => navigate('/create-project')}
-                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 text-gray-900 font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-amber-500/30 transition-all"
-                  >
-                    <Plus className="w-5 h-5" /> Créer un projet
-                  </button>
+                  <h2 className="text-2xl font-bold text-white">{isManager ? 'Projets' : 'Mes Projets'}</h2>
+                  {!isManager && (
+                    <button
+                      onClick={() => navigate('/create-project')}
+                      className="px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 text-gray-900 font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-amber-500/30 transition-all"
+                    >
+                      <Plus className="w-5 h-5" /> Créer un projet
+                    </button>
+                  )}
                 </div>
                 {renderProjectList(true)}
               </div>

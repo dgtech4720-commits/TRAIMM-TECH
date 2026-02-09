@@ -269,9 +269,77 @@ async function submitProject(projectId: number): Promise<boolean> {
   return true;
 }
 
+/**
+ * Récupère TOUS les projets (vue manager)
+ */
+async function getAllProjects(): Promise<any[]> {
+  const { data, error } = await supabase
+    .from('projects_with_totals')
+    .select(PROJECTS_WITH_TOTALS_SELECT)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching all projects:', error.message);
+    return [];
+  }
+
+  // Fetch client names for each unique client_id
+  const projects = data || [];
+  const clientIds = [...new Set(projects.map((p: any) => p.client_id))];
+  const clientNames: Record<string, string> = {};
+  for (const cid of clientIds) {
+    const profile = await profilesService.getProfile(cid as string);
+    if (profile) clientNames[cid as string] = profile.full_name || profile.id;
+  }
+  return projects.map((p: any) => ({ ...p, client: { full_name: clientNames[p.client_id] || null } }));
+}
+
+/**
+ * Récupère les projets assignés à un manager
+ */
+async function getProjectsForManager(managerId: string): Promise<any[]> {
+  const { data, error } = await supabase
+    .from('projects_with_totals')
+    .select(PROJECTS_WITH_TOTALS_SELECT)
+    .eq('manager_id', managerId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error(`Error fetching projects for manager ${managerId}:`, error.message);
+    return [];
+  }
+
+  const projects = data || [];
+  const clientIds = [...new Set(projects.map((p: any) => p.client_id))];
+  const clientNames: Record<string, string> = {};
+  for (const cid of clientIds) {
+    const profile = await profilesService.getProfile(cid as string);
+    if (profile) clientNames[cid as string] = profile.full_name || profile.id;
+  }
+  return projects.map((p: any) => ({ ...p, client: { full_name: clientNames[p.client_id] || null } }));
+}
+
+/**
+ * Assigne un manager à un projet
+ */
+async function assignManager(projectId: number, managerId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('projects')
+    .update({ manager_id: managerId } as any)
+    .eq('id', projectId);
+
+  if (error) {
+    console.error(`Error assigning manager to project ${projectId}:`, error.message);
+    return false;
+  }
+  return true;
+}
+
 export const projectsService = {
   getProjectById,
   getProjectsForClient,
+  getProjectsForManager,
+  getAllProjects,
   getIncompleteOnboardingProject,
   hasCompletedOnboarding,
   createProjectStep1,
@@ -280,5 +348,6 @@ export const projectsService = {
   updateProject,
   submitProject,
   updateProjectStatus,
+  assignManager,
   deleteProject,
 };
